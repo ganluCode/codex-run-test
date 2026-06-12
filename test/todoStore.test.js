@@ -48,3 +48,30 @@ test('多次调用 createTodoStore 会返回彼此独立的 store 实例', () =>
   ]);
   assert.deepEqual(secondStore.list(), []);
 });
+
+test('add 拒绝空字符串并抛出 TypeError', () => {
+  const store = createTodoStore();
+  assert.throws(() => store.add(''), TypeError);
+  assert.throws(() => store.add('   '), TypeError);
+});
+
+test('remove 删除指定 Todo 并返回被删除的条目', () => {
+  const store = createTodoStore();
+  store.add('待删除');
+  store.add('保留项');
+
+  const removed = store.remove(1);
+
+  assert.deepEqual(removed, { id: 1, title: '待删除', completed: false });
+  assert.deepEqual(store.list(), [{ id: 2, title: '保留项', completed: false }]);
+});
+
+test('complete 在 id 不存在时抛出 RangeError', () => {
+  const store = createTodoStore();
+  assert.throws(() => store.complete(99), RangeError);
+});
+
+test('remove 在 id 不存在时抛出 RangeError', () => {
+  const store = createTodoStore();
+  assert.throws(() => store.remove(99), RangeError);
+});
