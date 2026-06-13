@@ -55,6 +55,12 @@ test('add 拒绝空字符串并抛出 TypeError', () => {
   assert.throws(() => store.add('   '), TypeError);
 });
 
+test('add 拒绝非字符串 title 并抛出 TypeError', () => {
+  const store = createTodoStore();
+  assert.throws(() => store.add(null), TypeError);
+  assert.throws(() => store.add(123), TypeError);
+});
+
 test('remove 删除指定 Todo 并返回被删除的条目', () => {
   const store = createTodoStore();
   store.add('待删除');
