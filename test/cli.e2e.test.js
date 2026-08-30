@@ -225,6 +225,80 @@ test('端到端: 所有测试均使用注入的临时数据文件，不污染项
   }
 });
 
+test('端到端: 两个独立数据文件中的任务数据互不出现且互不影响', (t) => {
+  const dataFileA = tempDataFile(t);
+  const dataFileB = tempDataFile(t);
+
+  // 各自独立写入任务，ID 计数从各自数据文件独立递增
+  const addA = runCliProcess(['add', '文件A任务'], dataFileA);
+  assert.equal(addA.status, 0, addA.stderr);
+  assert.match(addA.stdout, /#1 \[未完成\] 文件A任务/);
+
+  const addB = runCliProcess(['add', '文件B任务'], dataFileB);
+  assert.equal(addB.status, 0, addB.stderr);
+  assert.match(addB.stdout, /#1 \[未完成\] 文件B任务/);
+
+  // list 只能看到自己数据文件中的任务
+  const listA = runCliProcess(['list'], dataFileA);
+  assert.equal(listA.status, 0, listA.stderr);
+  assert.doesNotMatch(listA.stdout, /文件B任务/);
+  assert.match(listA.stdout, /文件A任务/);
+
+  const listB = runCliProcess(['list'], dataFileB);
+  assert.equal(listB.status, 0, listB.stderr);
+  assert.doesNotMatch(listB.stdout, /文件A任务/);
+  assert.match(listB.stdout, /文件B任务/);
+
+  // 对 A 的修改（complete + remove）不影响 B 的数据
+  assert.equal(runCliProcess(['complete', '1'], dataFileA).status, 0);
+  assert.equal(runCliProcess(['remove', '1'], dataFileA).status, 0);
+
+  const listBAfter = runCliProcess(['list'], dataFileB);
+  assert.equal(listBAfter.status, 0, listBAfter.stderr);
+  const linesB = listBAfter.stdout.trim().split('\n');
+  assert.equal(linesB.length, 1);
+  assert.match(linesB[0], /#1 \[未完成\] 文件B任务/);
+
+  const listAAfter = runCliProcess(['list'], dataFileA);
+  assert.equal(listAAfter.status, 0, listAAfter.stderr);
+  assert.doesNotMatch(listAAfter.stdout, /文件B任务/);
+});
+
+test('端到端: 失败路径不删除或修改项目默认数据文件及用户已有数据', (t) => {
+  const existedBefore = existsSync(DEFAULT_DATA_FILE);
+  const contentBefore = existedBefore
+    ? readFileSync(DEFAULT_DATA_FILE, 'utf8')
+    : null;
+
+  // 覆盖全部指定的失败退出路径，全部使用临时数据文件
+  const failureCases = [
+    [['add', '   '], tempDataFile(t)],
+    [['complete', 'abc'], tempDataFile(t)],
+    [['remove', 'abc'], tempDataFile(t)],
+    [['complete', '99'], tempDataFile(t)],
+    [['remove', '99'], tempDataFile(t)],
+    [['frobnicate'], tempDataFile(t)],
+    [[], tempDataFile(t)],
+    [['add'], tempDataFile(t)],
+    [['complete'], tempDataFile(t)],
+    [['remove'], tempDataFile(t)],
+  ];
+  for (const [args, dataFile] of failureCases) {
+    const result = runCliProcess(args, dataFile);
+    assert.notEqual(result.status, 0, `应非零退出: ${args.join(' ')}`);
+    assert.equal(result.stdout, '', `stdout 应为空: ${args.join(' ')}`);
+    assert.notEqual(result.stderr.trim(), '', `stderr 应有错误: ${args.join(' ')}`);
+  }
+
+  // 项目默认数据文件不应被任何失败路径创建、删除或修改
+  if (existedBefore) {
+    assert.equal(existsSync(DEFAULT_DATA_FILE), true);
+    assert.equal(readFileSync(DEFAULT_DATA_FILE, 'utf8'), contentBefore);
+  } else {
+    assert.equal(existsSync(DEFAULT_DATA_FILE), false);
+  }
+});
+
 test('端到端: 测试结束后临时目录已被清理', (t) => {
   const dataFile = tempDataFile(t);
   const dir = join(dataFile, '..');
