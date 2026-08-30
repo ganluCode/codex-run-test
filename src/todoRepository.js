@@ -24,7 +24,12 @@ export function createTodoRepository(filePath) {
       return;
     }
     if (existsSync(filePath)) {
-      const raw = JSON.parse(readFileSync(filePath, 'utf8'));
+      let raw;
+      try {
+        raw = JSON.parse(readFileSync(filePath, 'utf8'));
+      } catch (cause) {
+        throw new Error(`无法解析 Todo 数据文件（JSON 损坏）: ${filePath}`, { cause });
+      }
       todos = raw.todos;
       nextId = raw.nextId;
     } else {
@@ -33,8 +38,21 @@ export function createTodoRepository(filePath) {
     loaded = true;
   }
 
+  function assertValidTitle(title) {
+    if (typeof title !== 'string' || title.trim() === '') {
+      throw new TypeError('title 必须是非空字符串');
+    }
+  }
+
+  function assertValidId(id) {
+    if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) {
+      throw new TypeError('id 必须是正整数');
+    }
+  }
+
   function add(title) {
     load();
+    assertValidTitle(title);
     const todo = {
       id: nextId,
       title,
@@ -56,6 +74,7 @@ export function createTodoRepository(filePath) {
 
   function complete(id) {
     load();
+    assertValidId(id);
     const index = findIndex(id);
     const updated = { ...todos[index], completed: true };
     todos[index] = updated;
@@ -65,6 +84,7 @@ export function createTodoRepository(filePath) {
 
   function remove(id) {
     load();
+    assertValidId(id);
     const index = findIndex(id);
     const [removed] = todos.splice(index, 1);
     persist();

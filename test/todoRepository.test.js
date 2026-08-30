@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -130,4 +130,62 @@ test('complete 和 remove 后的状态持久化，ID 计数在多实例间隔离
   const isolated = other.add('隔离文件任务');
 
   assert.equal(isolated.id, 1);
+});
+
+test('add 对非字符串、空字符串和纯空白标题抛出 TypeError，已有数据不被破坏', () => {
+  const filePath = tempFilePath();
+  const repository = createTodoRepository(filePath);
+  repository.add('已有任务');
+  const before = readFileSync(filePath, 'utf8');
+
+  for (const invalid of [undefined, null, 42, {}, [], '', '   ', '\t\n ']) {
+    assert.throws(() => repository.add(invalid), TypeError);
+  }
+
+  assert.equal(readFileSync(filePath, 'utf8'), before);
+  assert.deepEqual(repository.list(), [
+    { id: 1, title: '已有任务', completed: false },
+  ]);
+});
+
+test('complete 和 remove 对非数字、小数、零及负数 ID 抛出 TypeError', () => {
+  const repository = createTodoRepository(tempFilePath());
+  repository.add('目标任务');
+
+  for (const invalid of [undefined, null, 'abc', '1', NaN, Infinity, 1.5, 0, -1]) {
+    assert.throws(() => repository.complete(invalid), TypeError);
+    assert.throws(() => repository.remove(invalid), TypeError);
+  }
+
+  assert.deepEqual(repository.list(), [
+    { id: 1, title: '目标任务', completed: false },
+  ]);
+});
+
+test('complete 和 remove 对不存在但格式合法的 ID 抛出 RangeError，JSON 数据保持不变', () => {
+  const filePath = tempFilePath();
+  const repository = createTodoRepository(filePath);
+  repository.add('保留任务');
+  const before = readFileSync(filePath, 'utf8');
+
+  assert.throws(() => repository.complete(99), RangeError);
+  assert.throws(() => repository.remove(99), RangeError);
+
+  assert.equal(readFileSync(filePath, 'utf8'), before);
+  assert.deepEqual(repository.list(), [
+    { id: 1, title: '保留任务', completed: false },
+  ]);
+});
+
+test('读取无法解析的 JSON 数据文件时抛出清晰错误，文件内容不被覆盖或重置', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'todo-repo-corrupt-'));
+  const corruptPath = join(dir, 'todos.json');
+  writeFileSync(corruptPath, '{ 这不是合法 JSON', 'utf8');
+
+  const repository = createTodoRepository(corruptPath);
+
+  assert.throws(() => repository.list(), /JSON/);
+  assert.throws(() => repository.add('新任务'), /JSON/);
+
+  assert.equal(readFileSync(corruptPath, 'utf8'), '{ 这不是合法 JSON');
 });
