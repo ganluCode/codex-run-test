@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,13 +11,27 @@ import { DEFAULT_DATA_FILE } from '../src/cli.js';
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const cliEntry = join(projectRoot, 'src', 'cli.js');
 
-// 端到端测试统一通过 TODO_DATA_FILE 注入隔离的临时数据文件，不污染项目默认 JSON 数据文件。
-function tempDataFile() {
+/**
+ * 端到端测试基础设施：为单个测试创建独立的临时目录，
+ * 并在该测试结束时（无论成败）只清理本测试创建的临时目录。
+ * 所有 e2e 测试统一通过 TODO_DATA_FILE 注入隔离的数据文件，
+ * 不污染项目默认 JSON 数据文件。
+ *
+ * @param {import('node:test').TestContext} t - 当前测试上下文
+ * @returns {string} 本测试独占的临时目录路径
+ */
+function createTempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'todo-cli-e2e-'));
-  return join(dir, 'todos.json');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
 }
 
-// 以真实子进程执行 CLI 入口，返回退出码与 stdout / stderr 内容。
+// 在独立临时目录下创建本测试专属的数据文件路径，测试结束后随目录一并清理。
+function tempDataFile(t) {
+  return join(createTempDir(t), 'todos.json');
+}
+
+// 以真实子进程执行 CLI 入口（独立 Node.js 进程），返回退出码与 stdout / stderr 内容。
 function runCliProcess(args, dataFile) {
   const result = spawnSync(process.execPath, [cliEntry, ...args], {
     cwd: projectRoot,
@@ -31,8 +45,53 @@ function runCliProcess(args, dataFile) {
   };
 }
 
-test('端到端: add / list / complete / remove 全流程跨进程读写同一数据文件', () => {
-  const dataFile = tempDataFile();
+test('端到端: add 写入任务后，后续独立的 list 子进程能读取该任务', (t) => {
+  const dataFile = tempDataFile(t);
+
+  const add = runCliProcess(['add', '跨进程任务'], dataFile);
+  assert.equal(add.status, 0, add.stderr);
+  assert.equal(add.stderr, '');
+
+  // list 由全新的子进程执行，与 add 进程无任何共享内存
+  const list = runCliProcess(['list'], dataFile);
+  assert.equal(list.status, 0, list.stderr);
+  assert.equal(list.stderr, '');
+  assert.match(list.stdout, /#1 \[未完成\] 跨进程任务/);
+});
+
+test('端到端: complete 执行后，后续 list 子进程输出明确反映任务已完成', (t) => {
+  const dataFile = tempDataFile(t);
+
+  assert.equal(runCliProcess(['add', '待完成任务'], dataFile).status, 0);
+  const complete = runCliProcess(['complete', '1'], dataFile);
+  assert.equal(complete.status, 0, complete.stderr);
+
+  const list = runCliProcess(['list'], dataFile);
+  assert.equal(list.status, 0, list.stderr);
+  const line = list.stdout
+    .trim()
+    .split('\n')
+    .find((l) => l.includes('待完成任务'));
+  assert.ok(line, 'list 应包含已添加的任务');
+  assert.match(line, /已完成/);
+});
+
+test('端到端: remove 执行后，后续 list 子进程输出不再包含被删除任务', (t) => {
+  const dataFile = tempDataFile(t);
+
+  assert.equal(runCliProcess(['add', '将被删除'], dataFile).status, 0);
+  assert.equal(runCliProcess(['add', '保留任务'], dataFile).status, 0);
+  const remove = runCliProcess(['remove', '1'], dataFile);
+  assert.equal(remove.status, 0, remove.stderr);
+
+  const list = runCliProcess(['list'], dataFile);
+  assert.equal(list.status, 0, list.stderr);
+  assert.doesNotMatch(list.stdout, /将被删除/);
+  assert.match(list.stdout, /保留任务/);
+});
+
+test('端到端: add / list / complete / remove 全流程跨进程读写同一数据文件', (t) => {
+  const dataFile = tempDataFile(t);
 
   // add 两个任务
   const first = runCliProcess(['add', '任务甲'], dataFile);
@@ -76,8 +135,8 @@ test('端到端: add / list / complete / remove 全流程跨进程读写同一�
   assert.deepEqual(raw.todos[0], { id: 1, title: '任务甲', completed: true });
 });
 
-test('端到端: 空列表输出非错误提示且退出码为 0', () => {
-  const dataFile = tempDataFile();
+test('端到端: 空列表输出非错误提示且退出码为 0', (t) => {
+  const dataFile = tempDataFile(t);
   const result = runCliProcess(['list'], dataFile);
 
   assert.equal(result.status, 0, result.stderr);
@@ -85,16 +144,16 @@ test('端到端: 空列表输出非错误提示且退出码为 0', () => {
   assert.notEqual(result.stdout.trim(), '');
 });
 
-test('端到端: 未知命令退出码非零且错误只写入 stderr', () => {
-  const result = runCliProcess(['frobnicate'], tempDataFile());
+test('端到端: 未知命令退出码非零且错误只写入 stderr', (t) => {
+  const result = runCliProcess(['frobnicate'], tempDataFile(t));
 
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /未知命令/);
 });
 
-test('端到端: 参数不足（缺少命令、add 缺标题、complete 缺 ID）退出码非零', () => {
-  const dataFile = tempDataFile();
+test('端到端: 参数不足（缺少命令、add 缺标题、complete 缺 ID）退出码非零', (t) => {
+  const dataFile = tempDataFile(t);
 
   const noCommand = runCliProcess([], dataFile);
   assert.notEqual(noCommand.status, 0);
@@ -112,24 +171,24 @@ test('端到端: 参数不足（缺少命令、add 缺标题、complete 缺 ID�
   assert.notEqual(noId.stderr.trim(), '');
 });
 
-test('端到端: 空标题退出码非零且错误只写入 stderr', () => {
-  const result = runCliProcess(['add', '   '], tempDataFile());
+test('端到端: 空标题退出码非零且错误只写入 stderr', (t) => {
+  const result = runCliProcess(['add', '   '], tempDataFile(t));
 
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
   assert.notEqual(result.stderr.trim(), '');
 });
 
-test('端到端: 非法 ID 退出码非零且错误只写入 stderr', () => {
-  const result = runCliProcess(['complete', 'abc'], tempDataFile());
+test('端到端: 非法 ID 退出码非零且错误只写入 stderr', (t) => {
+  const result = runCliProcess(['complete', 'abc'], tempDataFile(t));
 
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
   assert.notEqual(result.stderr.trim(), '');
 });
 
-test('端到端: 不存在 ID 退出码非零且错误只写入 stderr', () => {
-  const dataFile = tempDataFile();
+test('端到端: 不存在 ID 退出码非零且错误只写入 stderr', (t) => {
+  const dataFile = tempDataFile(t);
   const add = runCliProcess(['add', '唯一任务'], dataFile);
   assert.equal(add.status, 0, add.stderr);
 
@@ -140,14 +199,14 @@ test('端到端: 不存在 ID 退出码非零且错误只写入 stderr', () => {
   assert.notEqual(result.stderr.trim(), '');
 });
 
-test('端到端: 所有测试均使用注入的临时数据文件，不污染项目默认 JSON 数据文件', () => {
+test('端到端: 所有测试均使用注入的临时数据文件，不污染项目默认 JSON 数据文件', (t) => {
   const existedBefore = existsSync(DEFAULT_DATA_FILE);
   const contentBefore = existedBefore
     ? readFileSync(DEFAULT_DATA_FILE, 'utf8')
     : null;
 
   // 用注入的临时数据文件执行一轮完整命令
-  const dataFile = tempDataFile();
+  const dataFile = tempDataFile(t);
   for (const args of [
     ['add', '隔离任务'],
     ['list'],
@@ -164,4 +223,18 @@ test('端到端: 所有测试均使用注入的临时数据文件，不污染项
   } else {
     assert.equal(existsSync(DEFAULT_DATA_FILE), false);
   }
+});
+
+test('端到端: 测试结束后临时目录已被清理', (t) => {
+  const dataFile = tempDataFile(t);
+  const dir = join(dataFile, '..');
+
+  const add = runCliProcess(['add', '清理验证'], dataFile);
+  assert.equal(add.status, 0, add.stderr);
+  assert.equal(existsSync(dataFile), true);
+
+  // 注册在 tempDataFile 之后的清理钩子先执行，此处验证数据文件已随目录删除
+  t.after(() => {
+    assert.equal(existsSync(dir), false, `临时目录应被清理: ${dir}`);
+  });
 });
