@@ -44,6 +44,25 @@ function runList(repository, stdout) {
   return 0;
 }
 
+// CLI 仅负责把字符串参数转换为数字 ID，业务校验由持久化核心完成。
+function parseIdArg(raw) {
+  return Number(raw);
+}
+
+function runComplete(repository, args, stdout) {
+  const id = parseIdArg(args[0]);
+  const todo = repository.complete(id);
+  stdout.write(`已完成 ${formatTodoLine(todo)}\n`);
+  return 0;
+}
+
+function runRemove(repository, args, stdout) {
+  const id = parseIdArg(args[0]);
+  const todo = repository.remove(id);
+  stdout.write(`已删除 ${formatTodoLine(todo)}\n`);
+  return 0;
+}
+
 /**
  * 可注入的 CLI 命令执行函数。
  *
@@ -71,6 +90,10 @@ export function runCli(argv, options = {}) {
         return runAdd(repository, args, stdout);
       case 'list':
         return runList(repository, stdout);
+      case 'complete':
+        return runComplete(repository, args, stdout);
+      case 'remove':
+        return runRemove(repository, args, stdout);
       case undefined:
         // 无命令时保持空运行行为：触发核心加载，首次运行创建缺失文件。
         repository.list();

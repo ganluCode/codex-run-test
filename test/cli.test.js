@@ -197,3 +197,161 @@ test('空列表输出明确的非错误提示，且退出码为 0', () => {
   assert.equal(stderr.getOutput(), '');
   assert.notEqual(stdout.getOutput().trim(), '');
 });
+
+test('complete 命令调用核心完成指定任务，stdout 输出成功结果并以退出码 0 结束', () => {
+  const dataFile = tempDataFile();
+  const repository = createTodoRepository(dataFile);
+  const todo = repository.add('复习笔记');
+
+  const stdout = createStreams();
+  const stderr = createStreams();
+  const exitCode = runCli(['complete', String(todo.id)], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr.getOutput(), '');
+  const output = stdout.getOutput();
+  assert.match(output, /复习笔记/);
+  assert.match(output, /已完成/);
+
+  const stored = createTodoRepository(dataFile).list();
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].completed, true);
+});
+
+test('remove 命令调用核心删除指定任务，stdout 输出成功结果并以退出码 0 结束', () => {
+  const dataFile = tempDataFile();
+  const repository = createTodoRepository(dataFile);
+  const todo = repository.add('过期任务');
+
+  const stdout = createStreams();
+  const stderr = createStreams();
+  const exitCode = runCli(['remove', String(todo.id)], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr.getOutput(), '');
+  const output = stdout.getOutput();
+  assert.match(output, /过期任务/);
+  assert.match(output, /删除/);
+
+  const stored = createTodoRepository(dataFile).list();
+  assert.equal(stored.length, 0);
+});
+
+test('完成后以同一数据文件再次执行 list 可看到完成状态', () => {
+  const dataFile = tempDataFile();
+
+  assert.equal(
+    runCli(['add', '提交报销'], {
+      stdout: createStreams().stream,
+      stderr: createStreams().stream,
+      dataFile,
+    }),
+    0,
+  );
+  assert.equal(
+    runCli(['complete', '1'], {
+      stdout: createStreams().stream,
+      stderr: createStreams().stream,
+      dataFile,
+    }),
+    0,
+  );
+
+  const stdout = createStreams();
+  const stderr = createStreams();
+  const listCode = runCli(['list'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.equal(listCode, 0);
+  assert.equal(stderr.getOutput(), '');
+  const output = stdout.getOutput();
+  assert.match(output, /提交报销/);
+  const line = output.trim().split('\n').find((l) => l.includes('提交报销'));
+  assert.match(line, /已完成/);
+});
+
+test('删除后以同一数据文件再次执行 list 不再显示已删除任务', () => {
+  const dataFile = tempDataFile();
+
+  assert.equal(
+    runCli(['add', '临时任务'], {
+      stdout: createStreams().stream,
+      stderr: createStreams().stream,
+      dataFile,
+    }),
+    0,
+  );
+  assert.equal(
+    runCli(['add', '常驻任务'], {
+      stdout: createStreams().stream,
+      stderr: createStreams().stream,
+      dataFile,
+    }),
+    0,
+  );
+  assert.equal(
+    runCli(['remove', '1'], {
+      stdout: createStreams().stream,
+      stderr: createStreams().stream,
+      dataFile,
+    }),
+    0,
+  );
+
+  const stdout = createStreams();
+  const stderr = createStreams();
+  const listCode = runCli(['list'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.equal(listCode, 0);
+  assert.equal(stderr.getOutput(), '');
+  const output = stdout.getOutput();
+  assert.doesNotMatch(output, /临时任务/);
+  assert.match(output, /常驻任务/);
+});
+
+test('complete 不存在的 ID 时错误写入 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['complete', '99'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+test('remove 不存在的 ID 时错误写入 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['remove', '99'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
