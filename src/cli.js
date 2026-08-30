@@ -17,6 +17,33 @@ export function resolveDataFile(env = process.env) {
   return env.TODO_DATA_FILE || DEFAULT_DATA_FILE;
 }
 
+function formatStatus(completed) {
+  return completed ? '已完成' : '未完成';
+}
+
+function formatTodoLine(todo) {
+  return `#${todo.id} [${formatStatus(todo.completed)}] ${todo.title}`;
+}
+
+function runAdd(repository, args, stdout) {
+  const title = args.join(' ');
+  const todo = repository.add(title);
+  stdout.write(`已添加 ${formatTodoLine(todo)}\n`);
+  return 0;
+}
+
+function runList(repository, stdout) {
+  const todos = repository.list();
+  if (todos.length === 0) {
+    stdout.write('暂无 Todo，可使用 add <title> 新增任务\n');
+    return 0;
+  }
+  for (const todo of todos) {
+    stdout.write(`${formatTodoLine(todo)}\n`);
+  }
+  return 0;
+}
+
 /**
  * 可注入的 CLI 命令执行函数。
  *
@@ -36,13 +63,26 @@ export function runCli(argv, options = {}) {
 
   // 接入既有持久化 Todo 核心；核心负责首次创建缺失的数据文件和目录。
   const repository = createTodoRepository(dataFile);
-  repository.list();
+  const [command, ...args] = argv;
 
-  // 具体命令分发（add/list/complete/remove）由后续任务实现。
-  void argv;
-  void stdout;
-  void stderr;
-  return 0;
+  try {
+    switch (command) {
+      case 'add':
+        return runAdd(repository, args, stdout);
+      case 'list':
+        return runList(repository, stdout);
+      case undefined:
+        // 无命令时保持空运行行为：触发核心加载，首次运行创建缺失文件。
+        repository.list();
+        return 0;
+      default:
+        stderr.write(`未知命令: ${command}\n`);
+        return 1;
+    }
+  } catch (error) {
+    stderr.write(`错误: ${error.message}\n`);
+    return 1;
+  }
 }
 
 function isDirectRun() {
