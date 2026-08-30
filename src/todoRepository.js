@@ -46,6 +46,31 @@ export function createTodoRepository(filePath) {
     return cloneTodo(todo);
   }
 
+  function findIndex(id) {
+    const index = todos.findIndex((todo) => todo.id === id);
+    if (index === -1) {
+      throw new RangeError(`Todo ${id} 不存在`);
+    }
+    return index;
+  }
+
+  function complete(id) {
+    load();
+    const index = findIndex(id);
+    const updated = { ...todos[index], completed: true };
+    todos[index] = updated;
+    persist();
+    return cloneTodo(updated);
+  }
+
+  function remove(id) {
+    load();
+    const index = findIndex(id);
+    const [removed] = todos.splice(index, 1);
+    persist();
+    return cloneTodo(removed);
+  }
+
   function list() {
     load();
     const sorted = [...todos].sort((a, b) => a.id - b.id);
@@ -54,6 +79,8 @@ export function createTodoRepository(filePath) {
 
   return {
     add,
+    complete,
     list,
+    remove,
   };
 }
