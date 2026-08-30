@@ -35,7 +35,7 @@ function createStreams() {
 test('runCli 支持注入参数、输出流和数据文件路径并返回退出码', () => {
   const stdout = createStreams();
   const stderr = createStreams();
-  const exitCode = runCli([], {
+  const exitCode = runCli(['list'], {
     stdout: stdout.stream,
     stderr: stderr.stream,
     dataFile: tempDataFile(),
@@ -48,7 +48,7 @@ test('runCli 通过注入的数据文件接入持久化核心，首次运行创�
   const dataFile = tempDataFile();
   assert.equal(existsSync(dataFile), false);
 
-  const exitCode = runCli([], {
+  const exitCode = runCli(['list'], {
     stdout: createStreams().stream,
     stderr: createStreams().stream,
     dataFile,
@@ -97,7 +97,7 @@ test('可通过 node 直接执行 CLI 入口，核心负责创建缺失的数据
   const dataFile = tempDataFile();
   assert.equal(existsSync(dataFile), false);
 
-  const result = spawnSync(process.execPath, [cliEntry], {
+  const result = spawnSync(process.execPath, [cliEntry, 'list'], {
     cwd: projectRoot,
     env: { ...process.env, TODO_DATA_FILE: dataFile },
     encoding: 'utf8',
@@ -355,3 +355,139 @@ test('remove 不存在的 ID 时错误写入 stderr 且退出码非零', () => {
   assert.equal(stdout.getOutput(), '');
   assert.notEqual(stderr.getOutput().trim(), '');
 });
+
+test('缺少命令时输出明确错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli([], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+  assert.match(stderr.getOutput(), /命令/);
+});
+
+test('未知命令时输出明确错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['unknown'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+  assert.match(stderr.getOutput(), /未知命令/);
+});
+
+test('list 带多余位置参数时输出错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['list', '多余参数'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+test('add 缺少标题时输出错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['add'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+test('add 标题仅含空白时输出错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['add', '   '], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+test('complete 缺少 ID 时输出错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['complete'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+test('remove 缺少 ID 时输出错误到 stderr 且退出码非零', () => {
+  const dataFile = tempDataFile();
+  const stdout = createStreams();
+  const stderr = createStreams();
+
+  const exitCode = runCli(['remove'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    dataFile,
+  });
+
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout.getOutput(), '');
+  assert.notEqual(stderr.getOutput().trim(), '');
+});
+
+for (const command of ['complete', 'remove']) {
+  for (const invalidId of ['abc', '0', '-1', '1.5']) {
+    test(`${command} 的 ID 为非正整数 ${invalidId} 时错误只写入 stderr 且退出码非零`, () => {
+      const dataFile = tempDataFile();
+      const repository = createTodoRepository(dataFile);
+      repository.add('占位任务');
+
+      const stdout = createStreams();
+      const stderr = createStreams();
+      const exitCode = runCli([command, invalidId], {
+        stdout: stdout.stream,
+        stderr: stderr.stream,
+        dataFile,
+      });
+
+      assert.notEqual(exitCode, 0);
+      assert.equal(stdout.getOutput(), '');
+      assert.notEqual(stderr.getOutput().trim(), '');
+    });
+  }
+}

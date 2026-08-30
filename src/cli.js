@@ -27,6 +27,9 @@ function formatTodoLine(todo) {
 
 function runAdd(repository, args, stdout) {
   const title = args.join(' ');
+  if (title.trim() === '') {
+    throw new TypeError('add 需要非空标题，用法: add <title>');
+  }
   const todo = repository.add(title);
   stdout.write(`已添加 ${formatTodoLine(todo)}\n`);
   return 0;
@@ -44,20 +47,27 @@ function runList(repository, stdout) {
   return 0;
 }
 
-// CLI 仅负责把字符串参数转换为数字 ID，业务校验由持久化核心完成。
-function parseIdArg(raw) {
-  return Number(raw);
+// CLI 仅负责把字符串参数转换为正整数 ID，业务校验由持久化核心完成。
+function parseIdArg(raw, command) {
+  if (raw === undefined || String(raw).trim() === '') {
+    throw new TypeError(`${command} 缺少 ID，用法: ${command} <id>`);
+  }
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new TypeError(`${command} 需要 ID 为正整数，用法: ${command} <id>`);
+  }
+  return id;
 }
 
 function runComplete(repository, args, stdout) {
-  const id = parseIdArg(args[0]);
+  const id = parseIdArg(args[0], 'complete');
   const todo = repository.complete(id);
   stdout.write(`已完成 ${formatTodoLine(todo)}\n`);
   return 0;
 }
 
 function runRemove(repository, args, stdout) {
-  const id = parseIdArg(args[0]);
+  const id = parseIdArg(args[0], 'remove');
   const todo = repository.remove(id);
   stdout.write(`已删除 ${formatTodoLine(todo)}\n`);
   return 0;
@@ -89,15 +99,18 @@ export function runCli(argv, options = {}) {
       case 'add':
         return runAdd(repository, args, stdout);
       case 'list':
+        if (args.length > 0) {
+          throw new TypeError('list 不接受位置参数，用法: list');
+        }
         return runList(repository, stdout);
       case 'complete':
         return runComplete(repository, args, stdout);
       case 'remove':
         return runRemove(repository, args, stdout);
       case undefined:
-        // 无命令时保持空运行行为：触发核心加载，首次运行创建缺失文件。
-        repository.list();
-        return 0;
+        throw new TypeError(
+          '缺少命令，可用命令: add <title> | list | complete <id> | remove <id>',
+        );
       default:
         stderr.write(`未知命令: ${command}\n`);
         return 1;
